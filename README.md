@@ -1,1 +1,1 @@
-# CppPractice1
+# nBodySimulationCpp

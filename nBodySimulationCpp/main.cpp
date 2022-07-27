@@ -285,7 +285,7 @@ void InitDeviceAndSwapChain(HWND hwnd, IDXGIAdapter* adapter, UINT windowWidth, 
 	swapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 	swapChainDesc.BufferDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
 	swapChainDesc.BufferDesc.Scaling = DXGI_MODE_SCALING_UNSPECIFIED;
-	swapChainDesc.SampleDesc.Count = 1; // whats that?
+	swapChainDesc.SampleDesc.Count = 4; // whats that?
 	swapChainDesc.SampleDesc.Quality = 0;
 	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 	swapChainDesc.BufferCount = 1;
@@ -312,6 +312,8 @@ void InitDeviceAndSwapChain(HWND hwnd, IDXGIAdapter* adapter, UINT windowWidth, 
 		NULL,
 		&directX11State->deviceContext
 	);
+	//UINT test;
+	//directX11State->device->CheckMultisampleQualityLevels(DXGI_FORMAT_R8G8B8A8_UNORM, 1, &test);
 	ShowIfError(hr, L"D3D11 init device and swapchain");
 
 	adapter->Release();
@@ -332,7 +334,7 @@ void CreateDirectX11Resources(UINT windowWidth, UINT windowHeight, DirectX11Stat
 	depthStencilTextureDesc.MipLevels = 1;
 	depthStencilTextureDesc.ArraySize = 1;
 	depthStencilTextureDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-	depthStencilTextureDesc.SampleDesc.Count = 1;
+	depthStencilTextureDesc.SampleDesc.Count = 4;
 	depthStencilTextureDesc.SampleDesc.Quality = 0;
 	depthStencilTextureDesc.Usage = D3D11_USAGE_DEFAULT;
 	depthStencilTextureDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
@@ -814,7 +816,7 @@ void InitiGameObjects(
 	FLOAT width2 = (FLOAT)fakeElementsAmount / (FLOAT)height2;
 
 	// generating the sphere with fake objects
-	UINT stacksCount = 3200;
+	UINT stacksCount = 320;
 	UINT sectorsCount = fakeElementsAmount / stacksCount;
 	FLOAT radius = 30.0f;
 
@@ -1271,7 +1273,6 @@ int WINAPI wWinMain(
 	UINT realObjectPositionsMemSize = sizeof(DirectX::XMFLOAT3) * windowData.realElementsAmount;
 	UINT realObjectVelocitiesMemSize = sizeof(DirectX::XMFLOAT3) * windowData.realElementsAmount;
 
-	//windowData.fakeVertexPrimitives = (FakeObjectVertexPrimitive*)malloc(sizeof(FakeObjectVertexPrimitive) * windowData.fakeElementsAmount);
 	windowData.realVertexPrimitives = (RealObjectVertexPrimitive*)malloc(sizeof(RealObjectVertexPrimitive) * windowData.realElementsAmount * 8);
 	DirectX::XMFLOAT3* fakeObjectPositions = (DirectX::XMFLOAT3*)malloc(fakeObjectPositionsMemSize);
 	DirectX::XMFLOAT3* fakeObjectVelocities = (DirectX::XMFLOAT3*)malloc(fakeObjectVelocitiesMemSize);
