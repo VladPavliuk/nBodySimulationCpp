@@ -280,12 +280,12 @@ void InitDeviceAndSwapChain(HWND hwnd, IDXGIAdapter* adapter, UINT windowWidth, 
 	DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
 	swapChainDesc.BufferDesc.Width = windowWidth;
 	swapChainDesc.BufferDesc.Height = windowHeight;
-	swapChainDesc.BufferDesc.RefreshRate.Numerator = 40;
+	swapChainDesc.BufferDesc.RefreshRate.Numerator = 144;
 	swapChainDesc.BufferDesc.RefreshRate.Denominator = 1;
 	swapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 	swapChainDesc.BufferDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
 	swapChainDesc.BufferDesc.Scaling = DXGI_MODE_SCALING_UNSPECIFIED;
-	swapChainDesc.SampleDesc.Count = 4; // whats that?
+	swapChainDesc.SampleDesc.Count = 8; // for multi sample anti-aliasing
 	swapChainDesc.SampleDesc.Quality = 0;
 	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 	swapChainDesc.BufferCount = 1;
@@ -334,7 +334,7 @@ void CreateDirectX11Resources(UINT windowWidth, UINT windowHeight, DirectX11Stat
 	depthStencilTextureDesc.MipLevels = 1;
 	depthStencilTextureDesc.ArraySize = 1;
 	depthStencilTextureDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-	depthStencilTextureDesc.SampleDesc.Count = 4;
+	depthStencilTextureDesc.SampleDesc.Count = 8;
 	depthStencilTextureDesc.SampleDesc.Quality = 0;
 	depthStencilTextureDesc.Usage = D3D11_USAGE_DEFAULT;
 	depthStencilTextureDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
@@ -456,9 +456,20 @@ GeometryShader LoadGeometryShader(ID3D11Device* device, std::wstring shaderPath)
 	HRESULT hr = D3DReadFileToBlob(shaderPath.c_str(), &shaderSourceBuffer);
 	ShowIfError(hr, L"Geometry shader file reading error");
 
-	hr = device->CreateGeometryShader(
+	D3D11_SO_DECLARATION_ENTRY geometryOutputDesc[] =
+	{
+		{ 0, "SV_POSITION", 0, 0, 4, 0 },
+		{ 0, "COLOR", 0, 0, 4, 0 },
+	};
+
+	hr = device->CreateGeometryShaderWithStreamOutput(
 		shaderSourceBuffer->GetBufferPointer(),
 		shaderSourceBuffer->GetBufferSize(),
+		geometryOutputDesc,
+		_countof(geometryOutputDesc),
+		NULL,
+		0,
+		0,
 		NULL,
 		&geometryShader.shader
 	);
@@ -699,7 +710,7 @@ void RunComputeShader(
 		deviceContext->CSSetUnorderedAccessViews(it->first, 1, &it->second, 0);
 	}
 
-	deviceContext->Dispatch(400, 10, 1);
+	deviceContext->Dispatch(1280, 100, 1);
 
 	D3D11_BUFFER_DESC outputBufferDesc = {};
 	outputGpuBuffer->GetDesc(&outputBufferDesc);
@@ -731,52 +742,74 @@ void RenderFrame(
 	PWSTR fpsCounter,
 	ShadersList shadersList,
 	std::map<std::string, ID3D11ShaderResourceView*> texturesList,
+	ID3D11Buffer* streamOutputBuffer,
 	BuffersList buffersList)
 {
+	ID3D11DeviceContext* ctx = directX11State.deviceContext;
 	FLOAT bgColor[] = { 0.0f, 0.0f, 0.0f, 0.1f };
 
-	directX11State.deviceContext->ClearRenderTargetView(directX11State.renderTargetView, bgColor);
-	directX11State.deviceContext->ClearDepthStencilView(directX11State.depthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+	ctx->ClearRenderTargetView(directX11State.renderTargetView, bgColor);
+	ctx->ClearDepthStencilView(directX11State.depthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
-	directX11State.deviceContext->RSSetState(directX11State.rasterizerState);
+	ctx->RSSetState(directX11State.rasterizerState);
 
-	directX11State.deviceContext->OMSetDepthStencilState(directX11State.depthStencilState, 0);
-	directX11State.deviceContext->PSSetSamplers(0, 1, &directX11State.samplerState);
+	ctx->OMSetDepthStencilState(directX11State.depthStencilState, 0);
+	ctx->PSSetSamplers(0, 1, &directX11State.samplerState);
 
-	directX11State.deviceContext->VSSetConstantBuffers(0, 1, &buffersList.constantBuffer.buffer);
+	ctx->VSSetConstantBuffers(0, 1, &buffersList.constantBuffer.buffer);
 	//> Drawing fake objects
-	UINT offset = 0;
-	directX11State.deviceContext->VSSetShader(shadersList.vertexShaders["default"].shader, NULL, 0);
-	directX11State.deviceContext->PSSetShader(shadersList.pixelShaders["default"].shader, NULL, 0);
-	directX11State.deviceContext->GSSetShader(shadersList.geometryShaders["default"].shader, NULL, 0);
-	directX11State.deviceContext->IASetInputLayout(shadersList.vertexShaders["default"].inputLayout);
-	directX11State.deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_POINTLIST);
+	ctx->VSSetShader(shadersList.vertexShaders["default"].shader, NULL, 0);
+	ctx->PSSetShader(shadersList.pixelShaders["default"].shader, NULL, 0);
+	ctx->GSSetShader(shadersList.geometryShaders["default"].shader, NULL, 0);
+	UINT streamOutputBuffersOffset[1] = { 0 };
+	ctx->SOSetTargets(1, &streamOutputBuffer, streamOutputBuffersOffset);
+	ctx->IASetInputLayout(shadersList.vertexShaders["default"].inputLayout);
+	ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_POINTLIST);
 
 	ID3D11Buffer* fakeObjectsBuffers[2] = { buffersList.fakeObjectsPositionsBuffer.buffer, buffersList.fakeObjectsColorsBuffer.buffer };
 	UINT strides[] = { buffersList.fakeObjectsPositionsBuffer.strideLength, buffersList.fakeObjectsColorsBuffer.strideLength };
 	UINT offsets[] = { 0,0 };
-	directX11State.deviceContext->IASetVertexBuffers(0, 2, fakeObjectsBuffers, strides, offsets);
-	directX11State.deviceContext->Draw(buffersList.fakeObjectsPositionsBuffer.length, 0);
+	ctx->IASetVertexBuffers(0, 2, fakeObjectsBuffers, strides, offsets);
 
-	directX11State.deviceContext->GSSetShader(0, NULL, 0);
+#ifdef _DEBUG
+	D3D11_QUERY_DESC queryDesc = { D3D11_QUERY_SO_STATISTICS };
+	ID3D11Query* query;
+	directX11State.device->CreateQuery(&queryDesc, &query);
+
+	ctx->Begin(query);
+#endif
+	ctx->Draw(buffersList.fakeObjectsPositionsBuffer.length, 0);
+
+#ifdef _DEBUG
+	ctx->End(query);
+
+	//UINT wasOverflow = ctx->GetData(query, 0, 0, 0);
+
+	D3D11_QUERY_DATA_SO_STATISTICS stats = {};
+	while (S_FALSE == ctx->GetData(query, &stats, sizeof(stats), 0));
+
+	query->Release();
+#endif
+
+	ctx->GSSetShader(0, NULL, 0);
 	//<
 
 	//> Drawing real objects
 	/*
 	offset = 0;
-	directX11State.deviceContext->VSSetShader(shadersList.vertexShaders["real"].shader, NULL, 0);
-	directX11State.deviceContext->PSSetShader(shadersList.pixelShaders["real"].shader, NULL, 0);
-	directX11State.deviceContext->IASetInputLayout(shadersList.vertexShaders["real"].inputLayout);
-	directX11State.deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	directX11State.deviceContext->IASetVertexBuffers(0, 1, &buffersList.realObjectsVertexBuffer.buffer, &buffersList.realObjectsVertexBuffer.strideLength, &offset);
-	directX11State.deviceContext->PSSetShaderResources(0, 1, &texturesList["default"]);
-	directX11State.deviceContext->IASetIndexBuffer(buffersList.realObjectsIndicesBuffer.buffer, DXGI_FORMAT_R32_UINT, 0);
-	directX11State.deviceContext->DrawIndexed(buffersList.realObjectsIndicesBuffer.length, 0, 0);
+	ctx->VSSetShader(shadersList.vertexShaders["real"].shader, NULL, 0);
+	ctx->PSSetShader(shadersList.pixelShaders["real"].shader, NULL, 0);
+	ctx->IASetInputLayout(shadersList.vertexShaders["real"].inputLayout);
+	ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	ctx->IASetVertexBuffers(0, 1, &buffersList.realObjectsVertexBuffer.buffer, &buffersList.realObjectsVertexBuffer.strideLength, &offset);
+	ctx->PSSetShaderResources(0, 1, &texturesList["default"]);
+	ctx->IASetIndexBuffer(buffersList.realObjectsIndicesBuffer.buffer, DXGI_FORMAT_R32_UINT, 0);
+	ctx->DrawIndexed(buffersList.realObjectsIndicesBuffer.length, 0, 0);
 	*/
 	//<
 
 	// NOTE: For some reasons if Geometry Shader is set, DirecXTK fonts can't be rendered!
-	directX11State.deviceContext->GSSetShader(0, NULL, 0);
+	ctx->GSSetShader(0, NULL, 0);
 
 	fontData.spriteBatch->Begin();
 	fontData.spriteFont->DrawString(fontData.spriteBatch, fpsCounter, DirectX::XMFLOAT2(10.0f, 10.0f), DirectX::Colors::White, 0.0f, DirectX::XMFLOAT2(0.0f, 0.0f), DirectX::XMFLOAT2(1.0f, 1.0f));
@@ -816,9 +849,9 @@ void InitiGameObjects(
 	FLOAT width2 = (FLOAT)fakeElementsAmount / (FLOAT)height2;
 
 	// generating the sphere with fake objects
-	UINT stacksCount = 320;
+	UINT stacksCount = 3200;
 	UINT sectorsCount = fakeElementsAmount / stacksCount;
-	FLOAT radius = 30.0f;
+	FLOAT radius = 60.0f;
 
 	for (UINT i = 0; i < sectorsCount; i++)
 	{
@@ -1181,7 +1214,7 @@ int WINAPI wWinMain(
 
 	WindowData windowData = {};
 
-	windowData.fakeElementsAmount = 256000;
+	windowData.fakeElementsAmount = 4096000;
 	windowData.realElementsAmount = 1;
 
 	HWND hwnd = CreateWindowEx(
@@ -1245,7 +1278,7 @@ int WINAPI wWinMain(
 	UINT i = 0;
 	IDXGIOutput* outputTarget;
 	// it's possible to have multiple output devices, but for now it's ignored
-	while (adapter->EnumOutputs(i, &outputTarget) == S_OK)
+	if (adapter->EnumOutputs(i, &outputTarget) == S_OK)
 	{
 		DXGI_OUTPUT_DESC desc;
 		outputTarget->GetDesc(&desc);
@@ -1257,8 +1290,6 @@ int WINAPI wWinMain(
 	}
 
 	windowData.directX11State = InitDirectX11(hwnd, adapter, windowData.windowWidth, windowData.windowHeight);
-
-	FLOAT bgColor[] = { 0.0f, 0.0f, 0.0f, 0.1f };
 
 	windowData.directX11State.swapChain->SetFullscreenState(true, 0);
 
@@ -1286,6 +1317,22 @@ int WINAPI wWinMain(
 
 	windowData.buffersList = InitScene(windowData.directX11State.device, fakeObjectPositions, fakeObjectColors,
 		windowData.fakeElementsAmount, windowData.realVertexPrimitives, windowData.realElementsAmount);
+
+	// set output stream
+	//>
+	ID3D11Buffer* streamOutputBuffer;
+
+	D3D11_BUFFER_DESC bufferDesc = {};
+	bufferDesc.ByteWidth = 3 * (sizeof(DirectX::XMFLOAT4) + sizeof(DirectX::XMFLOAT4)) * windowData.fakeElementsAmount;
+	bufferDesc.Usage = D3D11_USAGE_DEFAULT;
+	bufferDesc.BindFlags = D3D11_BIND_STREAM_OUTPUT | D3D11_BIND_SHADER_RESOURCE;
+	bufferDesc.CPUAccessFlags = 0;
+	bufferDesc.MiscFlags = 0;
+	bufferDesc.StructureByteStride = 0;
+
+	HRESULT hr = windowData.directX11State.device->CreateBuffer(&bufferDesc, NULL, &streamOutputBuffer);
+	ShowIfError(hr, L"Stream output buffer init error");
+	//<
 
 	// init font's data
 	windowData.fontData.spriteBatch = new DirectX::SpriteBatch(windowData.directX11State.deviceContext);
@@ -1462,7 +1509,7 @@ int WINAPI wWinMain(
 		}
 
 		swprintf(deltaTimestampTextBuffer, _countof(deltaTimestampTextBuffer), L"%.0f FPS", 1.0f / deltaTimestamp);
-		RenderFrame(windowData.directX11State, windowData.fontData, deltaTimestampTextBuffer, windowData.shadersList, windowData.texturesList, windowData.buffersList);
+		RenderFrame(windowData.directX11State, windowData.fontData, deltaTimestampTextBuffer, windowData.shadersList, windowData.texturesList, streamOutputBuffer, windowData.buffersList);
 
 		if (requestToRestartGame)
 		{

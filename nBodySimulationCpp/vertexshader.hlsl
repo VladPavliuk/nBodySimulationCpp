@@ -18,7 +18,7 @@ struct VS_OUTPUT
     //float2 outTexCoord : COLOR;
 };
 
-VS_OUTPUT main(VS_INPUT input)
+VS_OUTPUT main(VS_INPUT input, uint id: SV_VertexID)
 {
     VS_OUTPUT output;
     
